@@ -2,46 +2,47 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>特教考卷朗讀製作工具</title>
+    <title>裕文國小資源班 - 互動考卷製作工具</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <style>
         body { font-family: sans-serif; margin: 0; background: #eee; display: flex; flex-direction: column; align-items: center; padding-top: 60px; }
-        #toolbar { position: fixed; top: 0; width: 100%; height: 50px; background: #333; color: white; display: flex; align-items: center; justify-content: center; z-index: 1000; gap: 15px; }
+        #toolbar { position: fixed; top: 0; width: 100%; height: 55px; background: #333; color: white; display: flex; align-items: center; justify-content: center; z-index: 1000; gap: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
         .page-container { position: relative; margin: 20px; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.2); cursor: crosshair; }
         canvas { display: block; width: 1000px; }
-        .selection-box { position: absolute; border: 2px solid #ff4444; background: rgba(255, 68, 68, 0.1); pointer-events: auto; }
-        button { padding: 5px 15px; cursor: pointer; border-radius: 4px; border: none; font-weight: bold; }
+        .selection-box { position: absolute; border: 2px solid #ff4444; background: rgba(255, 68, 68, 0.15); pointer-events: auto; }
+        button { padding: 8px 16px; cursor: pointer; border-radius: 4px; border: none; font-weight: bold; }
         #export-btn { background: #4caf50; color: white; }
         #file-input { color: white; }
+        .instructions { font-size: 14px; color: #ccc; }
     </style>
 </head>
 <body>
     <div id="toolbar">
         <input type="file" id="file-input" accept="application/pdf">
-        <span>框選題目後點擊：</span>
-        <button id="export-btn">完成並下載學生版</button>
+        <span class="instructions">滑鼠框選題目後點擊：</span>
+        <button id="export-btn">✅ 完成並下載學生版</button>
     </div>
     <div id="viewer"></div>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-        let pdfDoc = null, pagesData = [], currentBoxes = [];
+        let pagesData = [], currentBoxes = [];
 
+        // 1. 讀取與渲染 PDF
         document.getElementById('file-input').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
             const arrayBuffer = await file.arrayBuffer();
-            pdfDoc = await pdfjsLib.getDocument(arrayBuffer).promise;
-            renderAllPages();
-        });
-
-        async function renderAllPages() {
+            const pdfDoc = await pdfjsLib.getDocument(arrayBuffer).promise;
             const viewer = document.getElementById('viewer');
             viewer.innerHTML = '';
             pagesData = [];
+            currentBoxes = [];
+
             for (let i = 1; i <= pdfDoc.numPages; i++) {
                 const page = await pdfDoc.getPage(i);
-                const viewport = page.getViewport({ scale: 2 });
+                const scale = 2; // 高清縮放
+                const viewport = page.getViewport({ scale });
                 const container = document.createElement('div');
                 container.className = 'page-container';
                 const canvas = document.createElement('canvas');
@@ -50,30 +51,35 @@
                 canvas.width = viewport.width;
                 await page.render({ canvasContext: context, viewport: viewport }).promise;
                 
-                const imgData = canvas.toDataURL('image/png');
+                const imgBase64 = canvas.toDataURL('image/png');
                 const textContent = await page.getTextContent();
+                
+                // 處理文字座標
                 const words = textContent.items.map(item => ({
                     text: item.str,
                     x: (item.transform[4] / page.view[2]) * 100,
-                    y: (1 - (item.transform[5] / page.view[3])) * 100 * (page.view[3]/page.view[2]) // 簡化座標
+                    y: (1 - (item.transform[5] / page.view[3])) * 100
                 }));
 
                 container.appendChild(canvas);
-                setupDrawing(container, i - 1, imgData, words);
+                pagesData.push({ img: imgBase64, words: words, w: page.view[2], h: page.view[3] });
+                setupSelection(container, i - 1);
                 viewer.appendChild(container);
             }
-        }
+            alert("考卷讀取成功！請開始在題目上框選範圍。");
+        });
 
-        function setupDrawing(container, pageIdx, imgData, words) {
-            pagesData[pageIdx] = { img: imgData, words: words };
+        // 2. 框選邏輯
+        function setupSelection(container, pIdx) {
             container.onmousedown = (e) => {
+                if (e.target.className === 'selection-box') return;
                 const rect = container.getBoundingClientRect();
                 const startX = e.clientX - rect.left, startY = e.clientY - rect.top;
                 const box = document.createElement('div');
                 box.className = 'selection-box';
                 container.appendChild(box);
 
-                const moveHandler = (me) => {
+                const onMove = (me) => {
                     const curX = me.clientX - rect.left, curY = me.clientY - rect.top;
                     box.style.left = Math.min(startX, curX) + 'px';
                     box.style.top = Math.min(startY, curY) + 'px';
@@ -81,26 +87,66 @@
                     box.style.height = Math.abs(curY - startY) + 'px';
                 };
 
-                const upHandler = () => {
-                    document.removeEventListener('mousemove', moveHandler);
-                    document.removeEventListener('mouseup', upHandler);
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    
                     const l = (parseFloat(box.style.left) / rect.width) * 100;
                     const t = (parseFloat(box.style.top) / rect.height) * 100;
-                    const w = (parseFloat(box.style.width) / rect.width) * 100;
-                    const h = (parseFloat(box.style.height) / rect.height) * 100;
-                    
-                    // 這裡簡化抓取逻辑，實際使用可再優化
-                    currentBoxes.push({ pageIdx, l, t, w, h });
-                    box.onclick = () => { /* 預覽功能 */ alert("已記錄此區域"); };
+                    const r = ((parseFloat(box.style.left) + parseFloat(box.style.width)) / rect.width) * 100;
+                    const b = ((parseFloat(box.style.top) + parseFloat(box.style.height)) / rect.height) * 100;
+
+                    // 抓取框內的文字
+                    const text = pagesData[pIdx].words
+                        .filter(w => w.x >= l && w.x <= r && w.y >= t && w.y <= b)
+                        .map(w => w.text).join("");
+
+                    if (text.trim()) {
+                        currentBoxes.push({ pIdx, l, t, w: r - l, h: b - t, text: text.trim() });
+                        box.title = "已記錄題目內容";
+                    } else {
+                        container.removeChild(box);
+                    }
                 };
-                document.addEventListener('mousemove', moveHandler);
-                document.addEventListener('mouseup', upHandler);
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
             };
         }
 
+        // 3. 匯出學生版 HTML
         document.getElementById('export-btn').onclick = () => {
-            // 這裡會生成跟之前一樣的學生版 HTML 邏輯...
-            alert("正在開發匯出功能，請先確認 GitHub 部署成功！");
+            if (currentBoxes.length === 0) return alert("請先框選題目！");
+
+            let pagesHtml = "";
+            pagesData.forEach((p, i) => {
+                let triggers = currentBoxes.filter(box => box.pageIdx === i)
+                    .map(box => `<div class="speech-trigger" style="left:${box.l}%; top:${box.t}%; width:${box.w}%; height:${box.h}%;" onclick="speak('${box.text.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')"></div>`)
+                    .join("");
+                
+                pagesHtml += `<div class="page-container"><img src="${p.img}" style="width:100%;">${triggers}</div>`;
+            });
+
+            const finalHTML = `
+            <!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { margin: 0; background: #333; display: flex; flex-direction: column; align-items: center; padding-top: 70px; }
+                #stop-btn { position: fixed; top: 0; width: 100%; height: 60px; background: #f44336; color: white; font-size: 24px; font-weight: bold; border: none; z-index: 1000; cursor: pointer; }
+                .page-container { position: relative; margin-bottom: 20px; background: white; width: 98vw; max-width: 1000px; }
+                .speech-trigger { position: absolute; background: rgba(255, 255, 0, 0.01); cursor: pointer; }
+                .speech-trigger:active { background: rgba(255, 255, 0, 0.4); border: 3px solid red; }
+            </style></head><body>
+            <button id="stop-btn" onclick="window.speechSynthesis.cancel()">🛑 停止念書</button>
+            ${pagesHtml}
+            <script>
+                function speak(t) { window.speechSynthesis.cancel(); const m = new SpeechSynthesisUtterance(t); m.lang="zh-TW"; m.rate=0.75; window.speechSynthesis.speak(m); }
+            <\/script></body></html>`;
+
+            const blob = new Blob([finalHTML], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "student_exam.html";
+            a.click();
         };
     </script>
 </body>
