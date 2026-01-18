@@ -6,21 +6,21 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <style>
         body { font-family: sans-serif; margin: 0; background: #eee; display: flex; flex-direction: column; align-items: center; padding-top: 60px; }
-        #toolbar { position: fixed; top: 0; width: 100%; height: 55px; background: #333; color: white; display: flex; align-items: center; justify-content: center; z-index: 1000; gap: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        #toolbar { position: fixed; top: 0; width: 100%; height: 55px; background: #004d40; color: white; display: flex; align-items: center; justify-content: center; z-index: 1000; gap: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
         .page-container { position: relative; margin: 20px; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.2); cursor: crosshair; }
         canvas { display: block; width: 1000px; }
-        .selection-box { position: absolute; border: 2px solid #ff4444; background: rgba(255, 68, 68, 0.15); pointer-events: auto; }
+        .selection-box { position: absolute; border: 2px solid #ff4444; background: rgba(255, 68, 68, 0.2); pointer-events: auto; }
         button { padding: 8px 16px; cursor: pointer; border-radius: 4px; border: none; font-weight: bold; }
-        #export-btn { background: #4caf50; color: white; }
+        #export-btn { background: #ffc107; color: #333; }
         #file-input { color: white; }
-        .instructions { font-size: 14px; color: #ccc; }
     </style>
 </head>
 <body>
     <div id="toolbar">
+        <strong>裕文國小資源班工具</strong>
         <input type="file" id="file-input" accept="application/pdf">
-        <span class="instructions">滑鼠框選題目後點擊：</span>
-        <button id="export-btn">✅ 完成並下載學生版</button>
+        <span>框選題目後點擊：</span>
+        <button id="export-btn">✅ 下載裕文學生版</button>
     </div>
     <div id="viewer"></div>
 
@@ -28,21 +28,18 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         let pagesData = [], currentBoxes = [];
 
-        // 1. 讀取與渲染 PDF
-        document.getElementById('file-input').addEventListener('change', async (e) => {
+        document.getElementById('file-input').onchange = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
             const arrayBuffer = await file.arrayBuffer();
             const pdfDoc = await pdfjsLib.getDocument(arrayBuffer).promise;
             const viewer = document.getElementById('viewer');
             viewer.innerHTML = '';
-            pagesData = [];
-            currentBoxes = [];
+            pagesData = []; currentBoxes = [];
 
             for (let i = 1; i <= pdfDoc.numPages; i++) {
                 const page = await pdfDoc.getPage(i);
-                const scale = 2; // 高清縮放
-                const viewport = page.getViewport({ scale });
+                const viewport = page.getViewport({ scale: 2 });
                 const container = document.createElement('div');
                 container.className = 'page-container';
                 const canvas = document.createElement('canvas');
@@ -53,8 +50,6 @@
                 
                 const imgBase64 = canvas.toDataURL('image/png');
                 const textContent = await page.getTextContent();
-                
-                // 處理文字座標
                 const words = textContent.items.map(item => ({
                     text: item.str,
                     x: (item.transform[4] / page.view[2]) * 100,
@@ -62,14 +57,12 @@
                 }));
 
                 container.appendChild(canvas);
-                pagesData.push({ img: imgBase64, words: words, w: page.view[2], h: page.view[3] });
+                pagesData.push({ img: imgBase64, words: words });
                 setupSelection(container, i - 1);
                 viewer.appendChild(container);
             }
-            alert("考卷讀取成功！請開始在題目上框選範圍。");
-        });
+        };
 
-        // 2. 框選邏輯
         function setupSelection(container, pIdx) {
             container.onmousedown = (e) => {
                 if (e.target.className === 'selection-box') return;
@@ -90,20 +83,17 @@
                 const onUp = () => {
                     document.removeEventListener('mousemove', onMove);
                     document.removeEventListener('mouseup', onUp);
-                    
                     const l = (parseFloat(box.style.left) / rect.width) * 100;
                     const t = (parseFloat(box.style.top) / rect.height) * 100;
                     const r = ((parseFloat(box.style.left) + parseFloat(box.style.width)) / rect.width) * 100;
                     const b = ((parseFloat(box.style.top) + parseFloat(box.style.height)) / rect.height) * 100;
 
-                    // 抓取框內的文字
                     const text = pagesData[pIdx].words
                         .filter(w => w.x >= l && w.x <= r && w.y >= t && w.y <= b)
                         .map(w => w.text).join("");
 
                     if (text.trim()) {
-                        currentBoxes.push({ pIdx, l, t, w: r - l, h: b - t, text: text.trim() });
-                        box.title = "已記錄題目內容";
+                        currentBoxes.push({ pIdx, l, t, w: r-l, h: b-t, text: text.trim() });
                     } else {
                         container.removeChild(box);
                     }
@@ -113,39 +103,21 @@
             };
         }
 
-        // 3. 匯出學生版 HTML
         document.getElementById('export-btn').onclick = () => {
             if (currentBoxes.length === 0) return alert("請先框選題目！");
-
             let pagesHtml = "";
             pagesData.forEach((p, i) => {
-                let triggers = currentBoxes.filter(box => box.pageIdx === i)
+                let triggers = currentBoxes.filter(box => box.pIdx === i)
                     .map(box => `<div class="speech-trigger" style="left:${box.l}%; top:${box.t}%; width:${box.w}%; height:${box.h}%;" onclick="speak('${box.text.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')"></div>`)
                     .join("");
-                
                 pagesHtml += `<div class="page-container"><img src="${p.img}" style="width:100%;">${triggers}</div>`;
             });
 
-            const finalHTML = `
-            <!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                body { margin: 0; background: #333; display: flex; flex-direction: column; align-items: center; padding-top: 70px; }
-                #stop-btn { position: fixed; top: 0; width: 100%; height: 60px; background: #f44336; color: white; font-size: 24px; font-weight: bold; border: none; z-index: 1000; cursor: pointer; }
-                .page-container { position: relative; margin-bottom: 20px; background: white; width: 98vw; max-width: 1000px; }
-                .speech-trigger { position: absolute; background: rgba(255, 255, 0, 0.01); cursor: pointer; }
-                .speech-trigger:active { background: rgba(255, 255, 0, 0.4); border: 3px solid red; }
-            </style></head><body>
-            <button id="stop-btn" onclick="window.speechSynthesis.cancel()">🛑 停止念書</button>
-            ${pagesHtml}
-            <script>
-                function speak(t) { window.speechSynthesis.cancel(); const m = new SpeechSynthesisUtterance(t); m.lang="zh-TW"; m.rate=0.75; window.speechSynthesis.speak(m); }
-            <\/script></body></html>`;
-
-            const blob = new Blob([finalHTML], { type: 'text/html' });
-            const url = URL.createObjectURL(blob);
+            const finalDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{margin:0;background:#333;display:flex;flex-direction:column;align-items:center;padding-top:70px;}#stop-btn{position:fixed;top:0;width:100%;height:65px;background:#004d40;color:white;font-size:24px;font-weight:bold;border:none;z-index:1000;} .page-container{position:relative;margin-bottom:20px;background:white;width:98vw;max-width:1000px;} .speech-trigger{position:absolute;background:rgba(255,255,0,0.01);cursor:pointer;} .speech-trigger:active{background:rgba(255,255,0,0.4);border:4px solid #ffc107;}</style></head><body><button id="stop-btn" onclick="window.speechSynthesis.cancel()">🛑 裕文資源班-停止念書</button>${pagesHtml}<script>function speak(t){window.speechSynthesis.cancel();const m=new SpeechSynthesisUtterance(t);m.lang="zh-TW";m.rate=0.75;window.speechSynthesis.speak(m);}<\/script></body></html>`;
+            const blob = new Blob([finalDoc], { type: 'text/html' });
             const a = document.createElement('a');
-            a.href = url;
-            a.download = "student_exam.html";
+            a.href = URL.createObjectURL(blob);
+            a.download = "裕文資源班_學生考卷.html";
             a.click();
         };
     </script>
