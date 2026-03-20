@@ -11,9 +11,10 @@
         .page-container { position: relative; margin: 20px; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.2); cursor: crosshair; }
         canvas { display: block; width: 1000px; }
         .selection-box { position: absolute; border: 2px solid #ff4444; background: rgba(255, 68, 68, 0.2); pointer-events: auto; }
-        button { padding: 8px 12px; cursor: pointer; border-radius: 4px; border: none; font-weight: bold; }
+        button { padding: 8px 12px; cursor: pointer; border-radius: 4px; border: none; font-weight: bold; transition: 0.3s; }
+        button:hover { opacity: 0.8; }
         #export-btn { background: #ffc107; color: #333; }
-        #qr-section { background: white; padding: 20px; margin: 20px; border-radius: 10px; display: none; flex-direction: column; align-items: center; border: 3px solid #004d40; }
+        #qr-section { background: white; padding: 20px; margin: 20px; border-radius: 10px; display: none; flex-direction: column; align-items: center; border: 3px solid #004d40; position: fixed; top: 20%; z-index: 2000; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
         input[type="text"] { padding: 8px; width: 300px; border: 1px solid #ccc; border-radius: 4px; }
     </style>
 </head>
@@ -28,9 +29,9 @@
     </div>
 
     <div id="qr-section">
-        <h3 style="margin-top:0;">學生平板掃描處</h3>
+        <h3 style="margin-top:0; color:#004d40;">學生平板掃描處</h3>
         <div id="qrcode"></div>
-        <p style="color:#666; font-size:12px;">請確認雲端連結已開啟「知道連結的人均可查看」</p>
+        <p style="color:#666; font-size:12px; margin-top:15px;">請確認雲端連結已開啟「知道連結的人均可查看」</p>
         <button onclick="document.getElementById('qr-section').style.display='none'" style="background:#eee; margin-top:10px;">關閉視窗</button>
     </div>
 
@@ -40,7 +41,6 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         let pagesData = [], currentBoxes = [];
 
-        // PDF 渲染邏輯 (同前版)
         document.getElementById('file-input').onchange = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -90,23 +90,42 @@
                     const r = ((parseFloat(box.style.left) + parseFloat(box.style.width)) / rect.width) * 100;
                     const b = ((parseFloat(box.style.top) + parseFloat(box.style.height)) / rect.height) * 100;
                     const text = pagesData[pIdx].words.filter(w => w.x >= l && w.x <= r && w.y >= t && w.y <= b).map(w => w.text).join("");
-                    if (text.trim()) currentBoxes.push({ pIdx, l, t, w: r-l, h: b-t, text: text.trim() });
-                    else container.removeChild(box);
+                    if (text.trim()) {
+                        currentBoxes.push({ pIdx, l, t, w: r-l, h: b-t, text: text.trim() });
+                        // 老師預覽朗讀
+                        speak(text.trim());
+                    } else {
+                        container.removeChild(box);
+                    }
                 };
                 document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
             };
         }
 
-        // 產生 QR Code 的函數
         function generateQR() {
             const url = document.getElementById('qr-input').value;
-            if (!url) return alert("請先貼上連結！");
+            if (!url) return alert("請先貼上雲端連結！");
             document.getElementById('qrcode').innerHTML = "";
             new QRCode(document.getElementById("qrcode"), { text: url, width: 200, height: 200 });
             document.getElementById('qr-section').style.display = 'flex';
         }
 
-        // 匯出學生版 HTML (同前版)
+        // 核心語音邏輯優化
+        function speak(t) {
+            window.speechSynthesis.cancel();
+            // 處理特殊符號與斷句
+            const cleanText = t.replace(/(\d+)\./g, '第$1題。').replace(/\(/g, '括號').replace(/\)/g, ' ').replace(/__/g, '底線');
+            const m = new SpeechSynthesisUtterance(cleanText);
+            const voices = window.speechSynthesis.getVoices();
+            // 尋找高品質中文語音
+            const preferredVoice = voices.find(v => (v.lang === 'zh-TW') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium')));
+            if (preferredVoice) m.voice = preferredVoice;
+            m.lang = "zh-TW";
+            m.rate = 0.8;  // 適中偏慢語速
+            m.pitch = 1.05; // 略微上揚語調
+            window.speechSynthesis.speak(m);
+        }
+
         document.getElementById('export-btn').onclick = () => {
             if (currentBoxes.length === 0) return alert("請先框選題目！");
             let pagesHtml = "";
@@ -116,13 +135,15 @@
                     .join("");
                 pagesHtml += `<div class="page-container"><img src="${p.img}" style="width:100%;">${triggers}</div>`;
             });
-            const finalDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{margin:0;background:#333;display:flex;flex-direction:column;align-items:center;padding-top:70px;}#stop-btn{position:fixed;top:0;width:100%;height:60px;background:#004d40;color:white;font-size:24px;border:none;z-index:1000;}.page-container{position:relative;margin-bottom:20px;background:white;width:98vw;max-width:1000px;}.speech-trigger{position:absolute;background:rgba(255,255,0,0.01);cursor:pointer;}.speech-trigger:active{background:rgba(255,255,0,0.4);border:3px solid #ffc107;}</style></head><body><button id="stop-btn" onclick="window.speechSynthesis.cancel()">🛑 裕文資源班-停止念書</button>${pagesHtml}<script>function speak(t){window.speechSynthesis.cancel();const m=new SpeechSynthesisUtterance(t);m.lang="zh-TW";m.rate=0.75;window.speechSynthesis.speak(m);}<\/script></body></html>`;
+            const finalDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{margin:0;background:#333;display:flex;flex-direction:column;align-items:center;padding-top:75px;}#stop-btn{position:fixed;top:0;width:100%;height:65px;background:#004d40;color:white;font-size:24px;font-weight:bold;border:none;z-index:1000;}.page-container{position:relative;margin-bottom:20px;background:white;width:98vw;max-width:1000px;}.speech-trigger{position:absolute;background:rgba(255,255,0,0.01);cursor:pointer;}.speech-trigger:active{background:rgba(255,255,0,0.4);border:4px solid #ffc107;}</style></head><body><button id="stop-btn" onclick="window.speechSynthesis.cancel()">🛑 裕文資源班-停止念書</button>${pagesHtml}<script>function speak(t){window.speechSynthesis.cancel();const cleanText = t.replace(/(\\d+)\\./g, '第$1題。').replace(/\\(/g, '括號').replace(/\\)/g, ' ').replace(/__/g, '底線');const m=new SpeechSynthesisUtterance(cleanText);const voices=window.speechSynthesis.getVoices();const preferredVoice=voices.find(v=>(v.lang==='zh-TW')&&(v.name.includes('Google')||v.name.includes('Natural')||v.name.includes('Premium')));if(preferredVoice)m.voice=preferredVoice;m.lang="zh-TW";m.rate=0.75;m.pitch=1.05;window.speechSynthesis.speak(m);}<\/script></body></html>`;
             const blob = new Blob([finalDoc], { type: 'text/html' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
             a.download = "裕文資源班_學生考卷.html";
             a.click();
         };
+        // 確保語音清單載入
+        window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
     </script>
 </body>
 </html>
