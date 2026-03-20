@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>裕文資源班 - 互動考卷製作與 QR 分享工具</title>
+    <title>裕文資源班 - 互動考卷製作工具 (精準排序版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
@@ -12,9 +12,8 @@
         canvas { display: block; width: 1000px; }
         .selection-box { position: absolute; border: 2px solid #ff4444; background: rgba(255, 68, 68, 0.2); pointer-events: auto; }
         button { padding: 8px 12px; cursor: pointer; border-radius: 4px; border: none; font-weight: bold; transition: 0.3s; }
-        button:hover { opacity: 0.8; }
         #export-btn { background: #ffc107; color: #333; }
-        #qr-section { background: white; padding: 20px; margin: 20px; border-radius: 10px; display: none; flex-direction: column; align-items: center; border: 3px solid #004d40; position: fixed; top: 20%; z-index: 2000; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        #qr-section { background: white; padding: 20px; border-radius: 10px; display: none; flex-direction: column; align-items: center; border: 3px solid #004d40; position: fixed; top: 20%; z-index: 2000; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
         input[type="text"] { padding: 8px; width: 300px; border: 1px solid #ccc; border-radius: 4px; }
     </style>
 </head>
@@ -23,16 +22,15 @@
         <strong>裕文資源班工具</strong>
         <input type="file" id="file-input" accept="application/pdf">
         <button id="export-btn">✅ 1. 下載學生版</button>
-        <span style="margin-left:20px;">2. 貼上雲端連結生成 QR：</span>
-        <input type="text" id="qr-input" placeholder="請在此貼上雲端檔案連結">
-        <button onclick="generateQR()" style="background:#00796b; color:white;">生成 QR Code</button>
+        <span style="margin-left:20px;">2. 貼上連結生成 QR：</span>
+        <input type="text" id="qr-input" placeholder="請在此貼上雲端連結">
+        <button onclick="generateQR()" style="background:#00796b; color:white;">生成 QR</button>
     </div>
 
     <div id="qr-section">
         <h3 style="margin-top:0; color:#004d40;">學生平板掃描處</h3>
         <div id="qrcode"></div>
-        <p style="color:#666; font-size:12px; margin-top:15px;">請確認雲端連結已開啟「知道連結的人均可查看」</p>
-        <button onclick="document.getElementById('qr-section').style.display='none'" style="background:#eee; margin-top:10px;">關閉視窗</button>
+        <button onclick="document.getElementById('qr-section').style.display='none'" style="background:#eee; margin-top:10px;">關閉</button>
     </div>
 
     <div id="viewer"></div>
@@ -60,8 +58,14 @@
                 
                 const imgBase64 = canvas.toDataURL('image/png');
                 const textContent = await page.getTextContent();
+                
+                // 修正文字座標抓取
                 const words = textContent.items.map(item => ({
-                    text: item.str, x: (item.transform[4] / page.view[2]) * 100, y: (1 - (item.transform[5] / page.view[3])) * 100
+                    text: item.str, 
+                    x: (item.transform[4] / page.view[2]) * 100, 
+                    y: (1 - (item.transform[5] / page.view[3])) * 100,
+                    width: (item.width / page.view[2]) * 100,
+                    height: (item.height / page.view[3]) * 100
                 }));
                 container.appendChild(canvas);
                 pagesData.push({ img: imgBase64, words: words });
@@ -78,22 +82,37 @@
                 const box = document.createElement('div');
                 box.className = 'selection-box';
                 container.appendChild(box);
+                
                 const onMove = (me) => {
                     const curX = me.clientX - rect.left, curY = me.clientY - rect.top;
                     box.style.left = Math.min(startX, curX) + 'px'; box.style.top = Math.min(startY, curY) + 'px';
                     box.style.width = Math.abs(curX - startX) + 'px'; box.style.height = Math.abs(curY - startY) + 'px';
                 };
+
                 const onUp = () => {
                     document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
                     const l = (parseFloat(box.style.left) / rect.width) * 100;
                     const t = (parseFloat(box.style.top) / rect.height) * 100;
                     const r = ((parseFloat(box.style.left) + parseFloat(box.style.width)) / rect.width) * 100;
                     const b = ((parseFloat(box.style.top) + parseFloat(box.style.height)) / rect.height) * 100;
-                    const text = pagesData[pIdx].words.filter(w => w.x >= l && w.x <= r && w.y >= t && w.y <= b).map(w => w.text).join("");
+
+                    // ✨ 核心優化：抓取文字並進行座標排序
+                    let selectedWords = pagesData[pIdx].words.filter(w => 
+                        w.x >= (l - 1) && (w.x) <= (r + 1) && 
+                        w.y >= (t - 1) && (w.y) <= (b + 1)
+                    );
+
+                    // 依照 Y 軸(上下)排序，若 Y 軸相近則依照 X 軸(左右)排序
+                    selectedWords.sort((a, b) => {
+                        if (Math.abs(a.y - b.y) < 1.5) return a.x - b.x;
+                        return a.y - b.y;
+                    });
+
+                    const text = selectedWords.map(w => w.text).join("");
+
                     if (text.trim()) {
                         currentBoxes.push({ pIdx, l, t, w: r-l, h: b-t, text: text.trim() });
-                        // 老師預覽朗讀
-                        speak(text.trim());
+                        speak(text.trim()); // 預覽
                     } else {
                         container.removeChild(box);
                     }
@@ -104,25 +123,20 @@
 
         function generateQR() {
             const url = document.getElementById('qr-input').value;
-            if (!url) return alert("請先貼上雲端連結！");
+            if (!url) return alert("請先貼上連結！");
             document.getElementById('qrcode').innerHTML = "";
             new QRCode(document.getElementById("qrcode"), { text: url, width: 200, height: 200 });
             document.getElementById('qr-section').style.display = 'flex';
         }
 
-        // 核心語音邏輯優化
         function speak(t) {
             window.speechSynthesis.cancel();
-            // 處理特殊符號與斷句
             const cleanText = t.replace(/(\d+)\./g, '第$1題。').replace(/\(/g, '括號').replace(/\)/g, ' ').replace(/__/g, '底線');
             const m = new SpeechSynthesisUtterance(cleanText);
             const voices = window.speechSynthesis.getVoices();
-            // 尋找高品質中文語音
             const preferredVoice = voices.find(v => (v.lang === 'zh-TW') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium')));
             if (preferredVoice) m.voice = preferredVoice;
-            m.lang = "zh-TW";
-            m.rate = 0.8;  // 適中偏慢語速
-            m.pitch = 1.05; // 略微上揚語調
+            m.lang = "zh-TW"; m.rate = 0.8; m.pitch = 1.05;
             window.speechSynthesis.speak(m);
         }
 
@@ -142,7 +156,6 @@
             a.download = "裕文資源班_學生考卷.html";
             a.click();
         };
-        // 確保語音清單載入
         window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
     </script>
 </body>
