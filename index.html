@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>裕文資源班 - 互動考卷製作工具 (範圍強制黏合版)</title>
+    <title>裕文資源班 - 互動考卷製作工具 (語音平滑優化版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
@@ -81,21 +81,20 @@
                     const r = ((parseFloat(box.style.left) + parseFloat(box.style.width)) / rect.width) * 100;
                     const b = ((parseFloat(box.style.top) + parseFloat(box.style.height)) / rect.height) * 100;
 
-                    // ✨ 強制黏合邏輯：只要文字的任何一部分進入框框，就抓進來
                     let selectedWords = pagesData[pIdx].words.filter(w => 
                         ((w.x >= l && w.x <= r) || (w.x + w.w >= l && w.x + w.w <= r)) && 
                         (w.y >= t && w.y <= b)
                     );
 
-                    // 排序文字
                     selectedWords.sort((a, b) => {
                         if (Math.abs(a.y - b.y) < 1.0) return a.x - b.x;
                         return a.y - b.y;
                     });
 
-                    const text = selectedWords.map(w => w.text).join("");
+                    // ✨ 優化 1：將碎片黏合，移除空格與換行，防止斷斷續續
+                    const text = selectedWords.map(w => w.text).join("").replace(/\s+/g, "");
+                    
                     if (text.trim()) {
-                        // 讓感應區等於老師畫的紅框大小，不再依賴文字座標
                         currentBoxes.push({ pIdx, l, t, w: r-l, h: b-t, text: text.trim() });
                         speak(text.trim());
                     } else { container.removeChild(box); }
@@ -104,14 +103,31 @@
             };
         }
 
+        // ✨ 優化 2：強化語音處理，鎖定語音包並處理特殊字符
         function speak(t) {
             window.speechSynthesis.cancel();
-            const cleanText = t.replace(/(\d+)\./g, '。第$1題。').replace(/\(/g, '。括號').replace(/\)/g, '。').replace(/、/g, '。');
+            
+            // 讓唸題更順暢的過濾器
+            let cleanText = t.replace(/(\d+)\./g, '第$1題')
+                             .replace(/(\d+)、/g, '第$1題')
+                             .replace(/\(/g, '。括號')
+                             .replace(/\)/g, '。')
+                             .replace(/__/g, '底線')
+                             .replace(/？/g, '？。'); // 在問號後強制短停頓
+
             const m = new SpeechSynthesisUtterance(cleanText);
             const voices = window.speechSynthesis.getVoices();
-            const preferredVoice = voices.find(v => v.lang === 'zh-TW' && (v.name.includes('Google') || v.name.includes('Natural')));
-            if (preferredVoice) m.voice = preferredVoice;
-            m.lang = "zh-TW"; m.rate = 0.75; m.pitch = 1.05;
+            
+            // 鎖定優質中文語音，避免聲音變換
+            const preferredVoice = voices.find(v => v.lang === 'zh-TW' && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium')));
+            
+            if (preferredVoice) {
+                m.voice = preferredVoice;
+            }
+
+            m.lang = "zh-TW";
+            m.rate = 0.75;  
+            m.pitch = 1.0; 
             window.speechSynthesis.speak(m);
         }
 
@@ -124,13 +140,14 @@
                     .join("");
                 pagesHtml += `<div class="page-container"><img src="${p.img}" style="width:100%;">${triggers}</div>`;
             });
-            const finalDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{margin:0;background:#333;display:flex;flex-direction:column;align-items:center;padding-top:75px;}#stop-btn{position:fixed;top:0;width:100%;height:65px;background:#004d40;color:white;font-size:24px;font-weight:bold;border:none;z-index:1000;}.page-container{position:relative;margin-bottom:20px;background:white;width:98vw;max-width:1000px;}.speech-trigger{position:absolute;background:rgba(255,255,0,0.01);cursor:pointer;}.speech-trigger:active{background:rgba(255,255,0,0.4);border:4px solid #ffc107;}</style></head><body><button id="stop-btn" onclick="window.speechSynthesis.cancel()">🛑 裕文資源班-停止念書</button>${pagesHtml}<script>function speak(t){window.speechSynthesis.cancel();const cleanText = t.replace(/(\\d+)\\./g, '。第$1題。').replace(/\\(/g, '。括號').replace(/\\)/g, '。').replace(/、/g, '。');const m=new SpeechSynthesisUtterance(cleanText);const voices=window.speechSynthesis.getVoices();const preferredVoice=voices.find(v=>v.lang==='zh-TW'&&(v.name.includes('Google')||v.name.includes('Natural')));if(preferredVoice)m.voice=preferredVoice;m.lang="zh-TW";m.rate=0.75;m.pitch=1.05;window.speechSynthesis.speak(m);}<\/script></body></html>`;
+            const finalDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{margin:0;background:#333;display:flex;flex-direction:column;align-items:center;padding-top:75px;}#stop-btn{position:fixed;top:0;width:100%;height:65px;background:#004d40;color:white;font-size:24px;font-weight:bold;border:none;z-index:1000;}.page-container{position:relative;margin-bottom:20px;background:white;width:98vw;max-width:1000px;}.speech-trigger{position:absolute;background:rgba(255,255,0,0.01);cursor:pointer;}.speech-trigger:active{background:rgba(255,255,0,0.4);border:4px solid #ffc107;}</style></head><body><button id="stop-btn" onclick="window.speechSynthesis.cancel()">🛑 裕文資源班-停止念書</button>${pagesHtml}<script>function speak(t){window.speechSynthesis.cancel();const cleanText = t.replace(/(\\d+)\\./g, '第$1題').replace(/(\\d+)、/g, '第$1題').replace(/\\(/g, '。括號').replace(/\\)/g, '。').replace(/__/g, '底線').replace(/？/g, '？。');const m=new SpeechSynthesisUtterance(cleanText);const voices=window.speechSynthesis.getVoices();const preferredVoice=voices.find(v=>v.lang==='zh-TW'&&(v.name.includes('Google')||v.name.includes('Natural')||v.name.includes('Premium')));if(preferredVoice)m.voice=preferredVoice;m.lang="zh-TW";m.rate=0.75;m.pitch=1.0;window.speechSynthesis.speak(m);}<\/script></body></html>`;
             const blob = new Blob([finalDoc], { type: 'text/html' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
             a.download = "裕文資源班_學生考卷.html";
             a.click();
         };
+
         function generateQR() {
             const url = document.getElementById('qr-input').value;
             if (!url) return alert("請先貼上連結！");
