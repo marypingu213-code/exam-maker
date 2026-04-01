@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>裕文資源班 - 互動考卷製作工具 (語音自然化優化版)</title>
+    <title>裕文資源班 - 互動考卷製作工具 (Word 優化版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
@@ -23,7 +23,7 @@
         <input type="file" id="file-input" accept="application/pdf">
         <button id="export-btn">✅ 1. 下載學生版</button>
         <span style="margin-left:10px;">2. 生成 QR：</span>
-        <input type="text" id="qr-input" placeholder="貼上連結後點右側按鈕">
+        <input type="text" id="qr-input" placeholder="貼上雲端連結生成 QR">
         <button onclick="generateQR()" style="background:#00796b; color:white;">生成 QR</button>
     </div>
     <div id="qr-section"><div id="qrcode"></div><button onclick="document.getElementById('qr-section').style.display='none'" style="margin-top:10px;">關閉</button></div>
@@ -84,8 +84,9 @@
                     const r = ((parseFloat(box.style.left) + parseFloat(box.style.width)) / rect.width) * 100;
                     const b = ((parseFloat(box.style.top) + parseFloat(box.style.height)) / rect.height) * 100;
 
+                    // ✨ 強力抓取：確保跨度內的所有字元都被納入
                     let selectedWords = pagesData[pIdx].words.filter(w => 
-                        ((w.x >= l && w.x <= r) || (w.x + w.w >= l && w.x + w.w <= r)) && 
+                        ((w.x >= (l-0.5) && w.x <= (r+0.5)) || (w.x + w.w >= (l-0.5) && w.x + w.w <= (r+0.5))) && 
                         (w.y >= (t-0.5) && w.y <= (b+0.5))
                     );
 
@@ -94,7 +95,7 @@
                         return a.y - b.y;
                     });
 
-                    // ✨ 強力黏合：移除換行、空白、特殊跳轉符號
+                    // ✨ 強力黏合：移除所有導致停頓的空白與符號
                     const text = selectedWords.map(w => w.text).join("").replace(/[\n\r\t]/g, "").replace(/\s+/g, "");
 
                     if (text.trim()) {
@@ -106,11 +107,9 @@
             };
         }
 
-        // ✨ 語音美化函式
         function speak(t) {
             window.speechSynthesis.cancel();
-            
-            // 將「空心圓」改為「畫圈」，並優化題號讀法
+            // ✨ 語音優化：處理「○」為「畫圈」，並優化題號讀法
             let cleanText = t.replace(/○/g, '畫圈')
                              .replace(/(\d+)\./g, '第$1題')
                              .replace(/(\d+)、/g, '第$1題')
@@ -120,14 +119,9 @@
 
             const m = new SpeechSynthesisUtterance(cleanText);
             const voices = window.speechSynthesis.getVoices();
-            
-            // 鎖定優質中文語音包
             const preferredVoice = voices.find(v => v.lang === 'zh-TW' && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium')));
             if (preferredVoice) m.voice = preferredVoice;
-
-            m.lang = "zh-TW";
-            m.rate = 0.75;  
-            m.pitch = 1.0; 
+            m.lang = "zh-TW"; m.rate = 0.75; m.pitch = 1.0;
             window.speechSynthesis.speak(m);
         }
 
